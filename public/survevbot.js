@@ -191,6 +191,9 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 			}
 
 			const { a, b, e, f } = thisArgs.getTransform();
+			
+			//🔥 核心更新：利用 atan2 從渲染矩陣中反推該圖片目前的「旋轉角度 (面向方向)」
+			const currentAngle = Math.atan2(b, a);
 
 			let drawHeight = 142; 
 			if (args.length === 9) drawHeight = args[8];
@@ -213,8 +216,8 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 					if ( drawHeight > myPlayerSize * 0.5 && drawHeight < myPlayerSize * 1.5 ) {
 						if ( distFromCenter > 40 ) {
 							radius = Math.hypot( a, b ) * drawHeight + 10;
-							//🔥 加入 drawHeight 紀錄，以供後續呼吸動畫追蹤
-							players.push( { x: e, y: f, h: drawHeight } );
+							//🔥 將提取出來的旋轉角度 (angle) 一併存入，交給 AI 判斷
+							players.push( { x: e, y: f, angle: currentAngle } );
 						}
 					}
 

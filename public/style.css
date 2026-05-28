@@ -6,7 +6,8 @@ body {
 }
 
 .container {
-    max-width: 900px;
+    /* 🔥 修改：將最大寬度從 900px 放寬到 1200px，讓整體版面與執行區塊變大 */
+    max-width: 1200px;
     margin: 0 auto;
     background: #ffffff;
     padding: 20px;
@@ -41,7 +42,9 @@ h1 {
 
 #target-frame {
     width: 100%;
-    height: 400px;
+    /* 🔥 修改：取消原本的 height: 400px，改用 aspect-ratio 設定 16:9 電腦螢幕比例 */
+    aspect-ratio: 16 / 9;
+    height: auto;
     border: 1px solid #cccccc;
     border-radius: 4px;
     margin-bottom: 15px;

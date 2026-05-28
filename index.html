@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>線上腳本執行器</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>線上腳本執行器</h1>
+        
+        <div class="url-bar">
+            <input type="text" id="url-input" placeholder="請輸入網址 (例如：https://example.com)">
+            <button onclick="loadUrl()">載入網頁</button>
+        </div>
+        
+        <iframe id="target-frame" src="about:blank"></iframe>
+        
+        <textarea id="code-input" placeholder="請在此輸入要在上方網頁執行的 JavaScript 程式碼...&#10;例如：document.body.style.backgroundColor = 'lightblue';"></textarea>
+        <button onclick="runScript()">在網頁上執行腳本</button>
+        
+        <div id="output-container">
+            <h3>執行結果與系統訊息：</h3>
+            <pre id="output"></pre>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>

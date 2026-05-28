@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Surviv.IO Aimbot, ESP & X-Ray (Tablet AI Bot)
 // @namespace    https://greasyfork.org/en/users/662330-zertalious
-// @version      0.1.3
-// @description  Advanced heuristic bot with vitality tracking (anti-static) and CQC Berserker Chase.
+// @version      0.2.6
+// @description  Official layout optimization for inside embedded frame games.
 // @author       Zertalious (Zert) & Enhanced Logic
 // @match        *://surviv.io/*
 // @match        *://surviv2.io/*
@@ -40,10 +40,9 @@ let cachedRect = null;
 let lastRectTime = 0;
 
 let myPlayerSize = 142;
+let myPos = { x: 0, y: 0 }; 
 
-//🔥 AI 生命特徵追蹤器陣列
-let entityTrackers = [];
-let nextEntityId = 1;
+window.currentFrameMaxBody = 0;
 
 window.toggleAimbot = function() { aimbotEnabled = !aimbotEnabled; };
 window.toggleESP = function() { espEnabled = !espEnabled; };
@@ -176,61 +175,59 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 			
 			const img = args[ 0 ];
 			
-			const imgWidth = img.width || 0;
-			const imgHeight = img.height || 0;
-			
-			if (imgWidth > 0 && imgHeight > 0) {
-				//🔥 嚴格防護 1：過濾過小的「原始圖片」。
-				// 玩家衣服原始圖檔通常大於 50x50。花瓣、子彈通常是 16 或 32 等低解析度貼圖。
-				if (imgWidth < 50 || imgHeight < 50) {
-					return Reflect.apply( ...arguments );
-				}
-				// 確保是正方形 (誤差 2 像素內)
-				if (Math.abs(imgWidth - imgHeight) > 2) {
-					return Reflect.apply( ...arguments );
-				}
-			}
-
-			const src = img.src || '';
-			if (typeof src === 'string') {
-				const lowerSrc = src.toLowerCase();
-				//🔥 加入 bullet(子彈), laser(雷射) 等更多黑名單
-				if (lowerSrc.includes('petal') || lowerSrc.includes('leaf') || lowerSrc.includes('particle') || lowerSrc.includes('smoke') || lowerSrc.includes('bullet') || lowerSrc.includes('laser')) {
-					return Reflect.apply( ...arguments );
-				}
-			}
-
-			const { a, b, e, f } = thisArgs.getTransform();
-			const currentAngle = Math.atan2(b, a);
-
-			let drawHeight = 142; 
-			if (args.length === 9) drawHeight = args[8];
-			else if (args.length === 5) drawHeight = args[4];
-
-			//🔥 嚴格防護 2：提高渲染的絕對最小門檻 (從 40 提高到 70)
-			if (drawHeight > 70 && drawHeight < 300) {
-
-				const centerX = thisArgs.canvas.width / 2;
-				const centerY = thisArgs.canvas.height / 2;
-				const distFromCenter = Math.hypot(e - centerX, f - centerY);
-
-				if ( distFromCenter <= 1 ) {
-					
-					if (drawHeight >= 70) {
-						myPlayerSize = drawHeight;
-					}
-
+			if (img._cachedSrc === undefined) {
+				let s = (typeof img.src === 'string') ? img.src.toLowerCase() : '';
+				//🔥 既然是官方最原始的代碼，直接鎖定官方的命名特徵：
+				// 服裝(outfit)或玩家角色(player)，並且絕對不包含地圖阻擋物(map)跟影子(shadow)及掉落物(loot)
+				if ((s.includes('outfit') || s.includes('player') || s.includes('surviv')) && !s.includes('map') && !s.includes('shadow') && !s.includes('loot') && !s.includes('particle')) {
+					s = 'valid';
 				} else {
+					s = 'ignore';
+				}
+				img._cachedSrc = s;
+			}
 
-					//🔥 嚴格防護 3：將相對大小的容忍範圍縮緊，從 0.5~1.5 縮小至 0.7~1.3 倍。
-					// 小物件即使被遊戲引擎放大，也很難達到玩家體型的 70%
-					if ( drawHeight > myPlayerSize * 0.7 && drawHeight < myPlayerSize * 1.3 ) {
+			if ( img._cachedSrc === 'valid' ) {
+
+				const { a, b, e, f } = thisArgs.getTransform();
+
+				let drawWidth = 0;
+				let drawHeight = 0; 
+
+				if (args.length === 9) {
+					drawWidth = args[7];
+					drawHeight = args[8];
+				} else if (args.length === 5) {
+					drawWidth = args[3];
+					drawHeight = args[4];
+				}
+
+				if (drawWidth <= 0 || drawHeight <= 0) return Reflect.apply( ...arguments );
+
+				// 只要比例接近正方形（圓形角色身型），且大小在玩家合理尺寸之內
+				let ratio = drawWidth / drawHeight;
+				if (ratio >= 0.7 && ratio <= 1.3 && drawHeight >= 35 && drawHeight < 300) {
+
+					const centerX = thisArgs.canvas.width / 2;
+					const centerY = thisArgs.canvas.height / 2;
+					const distFromCenter = Math.hypot(e - centerX, f - centerY);
+
+					if ( distFromCenter <= 30 ) {
+						
+						if (drawHeight > window.currentFrameMaxBody) {
+							window.currentFrameMaxBody = drawHeight;
+							myPlayerSize = drawHeight;
+							myPos = { x: e, y: f };
+						}
+
+					} else {
+
 						if ( distFromCenter > 40 ) {
 							radius = Math.hypot( a, b ) * drawHeight + 10;
-							players.push( { x: e, y: f, angle: currentAngle } );
+							players.push( { x: e, y: f, r: radius } );
 						}
-					}
 
+					}
 				}
 			}
 		}
@@ -246,43 +243,11 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 		args[ 0 ] = new Proxy( args[ 0 ], {
 			apply( target, thisArgs, args ) {
 
-				//🔥 AI 生命特徵分析器：過濾不會動的死物 (箱子、石頭)
-				let currentEntities = [];
-				for ( let i = 0; i < players.length; i ++ ) {
-					const p = players[ i ];
-					let bestMatch = null;
-					let bestDist = Infinity;
-					
-					// 尋找上一幀的同一個目標
-					for (let t of entityTrackers) {
-						let d = Math.hypot(p.x - t.x, p.y - t.y);
-						if (d < 50 && d < bestDist) {
-							bestDist = d;
-							bestMatch = t;
-						}
-					}
-					
-					if (bestMatch) {
-						// 真實玩家會有呼吸動畫，尺寸會微幅變化。死物尺寸永遠不變。
-						if (Math.abs(bestMatch.lastH - p.h) > 0.05) {
-							bestMatch.isAlive = true; // 判定為活體玩家！
-						}
-						bestMatch.lastH = p.h;
-						bestMatch.x = p.x;
-						bestMatch.y = p.y;
-						bestMatch.frames++;
-						currentEntities.push(bestMatch);
-					} else {
-						// 新目標，先給予 30 幀的觀察期
-						currentEntities.push({ id: nextEntityId++, x: p.x, y: p.y, lastH: p.h, isAlive: false, frames: 0 });
-					}
-				}
-				entityTrackers = currentEntities;
+				window.currentFrameMaxBody = 0;
 
-				//🔥 絕對剔除法則：觀察期超過 30 幀且無生命特徵 (不會動/不呼吸)，直接丟棄！
-				let validTargets = entityTrackers.filter(e => e.isAlive || e.frames < 30);
-
+				let validTargets = [...players];
 				players.length = 0;
+				
 				Reflect.apply( ...arguments );
 
 				const simulateTouch = (el, type, id, x, y) => {
@@ -330,13 +295,13 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 				ctx.globalAlpha = 1;
 
-				const exactCenterX = ctx.canvas.width / 2;
-				const exactCenterY = ctx.canvas.height / 2;
+				const myCharacterX = myPos.x !== 0 ? myPos.x : ctx.canvas.width / 2;
+				const myCharacterY = myPos.y !== 0 ? myPos.y : ctx.canvas.height / 2;
 
 				ctx.strokeStyle = 'blue';
 				ctx.lineWidth = 4;
 				ctx.beginPath();
-				ctx.arc(exactCenterX, exactCenterY, myPlayerSize / 2, 0, Math.PI * 2);
+				ctx.arc(myCharacterX, myCharacterY, myPlayerSize / 2, 0, Math.PI * 2);
 				ctx.stroke();
 
 				const targetElement = ctx.canvas ? ctx.canvas : window;
@@ -383,11 +348,10 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 				let minDistance = Infinity;
 				let targetPlayer = null;
 
-				//🔥 只鎖定「會動的有效目標」
 				for ( let i = 0; i < validTargets.length; i ++ ) {
 
 					const player = validTargets[ i ];
-					const distance = Math.hypot( player.x - exactCenterX, player.y - exactCenterY );
+					const distance = Math.hypot( player.x - myCharacterX, player.y - myCharacterY );
 
 					if ( distance < minDistance ) {
 						minDistance = distance;
@@ -402,7 +366,7 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 					ctx.strokeStyle = autobotEnabled ? '#ffeb3b' : 'red';
 
 					ctx.beginPath();
-					ctx.moveTo( exactCenterX, exactCenterY );
+					ctx.moveTo( myCharacterX, myCharacterY );
 					ctx.lineTo( targetPlayer.x, targetPlayer.y );
 					ctx.stroke();
 
@@ -411,7 +375,7 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 						if (p !== targetPlayer) {
 							ctx.strokeStyle = 'red';
 							ctx.beginPath();
-							ctx.moveTo( exactCenterX, exactCenterY );
+							ctx.moveTo( myCharacterX, myCharacterY );
 							ctx.lineTo( p.x, p.y );
 							ctx.stroke();
 						}
@@ -441,7 +405,7 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 					ctx.beginPath();
 					ctx.strokeStyle = autobotEnabled ? '#ffeb3b' : 'red'; 
-					ctx.arc( predictX, predictY, radius, 0, Math.PI * 2 );
+					ctx.arc( predictX, predictY, targetPlayer.r || radius, 0, Math.PI * 2 );
 					ctx.stroke();
 
 					let screenX = predictX;
@@ -463,7 +427,7 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 					if ( typeof PointerEvent !== 'undefined' || typeof TouchEvent !== 'undefined' ) {
 						
-						const rightAngle = Math.atan2(predictY - exactCenterY, predictX - exactCenterX);
+						const rightAngle = Math.atan2(predictY - myCharacterY, predictX - myCharacterX);
 						const rJoyCenterX = window.innerWidth * 0.75;
 						const rJoyCenterY = window.innerHeight * 0.75;
 						
@@ -482,9 +446,8 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 							const aiTime = Date.now() * 0.005;
 							const evasiveManeuver = Math.sin(aiTime) * 0.8;
 							
-							//🔥 近距離狂戰士模式：如果距離小於 180，直接奪取控制權，筆直跟著他貼臉狂射！
 							if (minDistance < 180) {
-								leftAngle = rightAngle; // 無視走位，直線追擊
+								leftAngle = rightAngle; 
 							} else if (minDistance >= 180 && minDistance <= 420) {
 								leftAngle = rightAngle + (Math.PI / 2) * (Math.sin(aiTime) > 0 ? 1 : -1); 
 							} else {

@@ -1,9 +1,8 @@
-
 // ==UserScript==
-// @name         Surviv.IO Aimbot, ESP & X-Ray
+// @name         Surviv.IO Aimbot, ESP & X-Ray (Tablet AI Bot)
 // @namespace    https://greasyfork.org/en/users/662330-zertalious
-// @version      0.0.6
-// @description  Aimbot, ESP and Auto-Bot for surviv.io with dynamic scaling detection.
+// @version      0.0.9
+// @description  Fully automated AI battle bot for tablet users with safety distance control and lead prediction.
 // @author       Zertalious (Zert)
 // @match        *://surviv.io/*
 // @match        *://surviv2.io/*
@@ -29,72 +28,24 @@
 let espEnabled = true;
 let aimbotEnabled = true;
 let xrayEnabled = true;
-//🔥 新增：全自動機器人模式開關
 let autobotEnabled = false; 
 
 let lastTargetPos = null;
 const predictionFactor = 2.5;
 
-let isSpoofingTouch = false;
-let lastFakeTouch = null;
+let isSpoofingRightJoy = false;
+let isSpoofingLeftJoy = false;
 
 let cachedRect = null;
 let lastRectTime = 0;
 
-let basePlayerSize = 142;
-let currentZoomScale = 1;
 let myPlayerSize = 142;
 let myPos = { x: 0, y: 0 }; 
-
-//🔥 新增：用來記錄目前假鍵盤的按壓狀態，避免重複發送事件卡死
-let keyState = { 'W': false, 'A': false, 'S': false, 'D': false };
-let isShooting = false;
 
 window.toggleAimbot = function() { aimbotEnabled = !aimbotEnabled; };
 window.toggleESP = function() { espEnabled = !espEnabled; };
 window.toggleXRay = function() { xrayEnabled = !xrayEnabled; };
-//🔥 新增：切換自動機器人的按鈕功能
 window.toggleAutobot = function() { autobotEnabled = !autobotEnabled; };
-
-//🔥 新增：模擬鍵盤按下的函式
-function setKey(key, state) {
-	if (keyState[key] !== state) {
-		keyState[key] = state;
-		const eventType = state ? 'keydown' : 'keyup';
-		const eventObj = new KeyboardEvent(eventType, {
-			key: key.toLowerCase(),
-			code: 'Key' + key,
-			keyCode: key.charCodeAt(0),
-			which: key.charCodeAt(0),
-			bubbles: true,
-			cancelable: true,
-			composed: true
-		});
-		window.dispatchEvent(eventObj);
-	}
-}
-
-//🔥 新增：模擬滑鼠/觸控開火的函式
-function setShooting(targetElement, state, x, y) {
-	if (isShooting !== state) {
-		isShooting = state;
-		const mouseEvent = state ? 'mousedown' : 'mouseup';
-		
-		targetElement.dispatchEvent(new MouseEvent(mouseEvent, {
-			clientX: x, clientY: y, button: 0, bubbles: true, cancelable: true, dispatchedByMe: true
-		}));
-		window.dispatchEvent(new MouseEvent(mouseEvent, {
-			clientX: x, clientY: y, button: 0, bubbles: true, cancelable: true, dispatchedByMe: true
-		}));
-
-		if (typeof PointerEvent !== 'undefined') {
-			const ptrEvent = state ? 'pointerdown' : 'pointerup';
-			const ptrDict = { clientX: x, clientY: y, button: 0, pointerId: 1, pointerType: 'mouse', bubbles: true, dispatchedByMe: true };
-			targetElement.dispatchEvent(new PointerEvent(ptrEvent, ptrDict));
-			window.dispatchEvent(new PointerEvent(ptrEvent, ptrDict));
-		}
-	}
-}
 
 Object.defineProperty( Object.prototype, 'textureCacheIds', {
 	set( value ) {
@@ -140,18 +91,8 @@ Object.defineProperty( Object.prototype, 'textureCacheIds', {
 	}
 } );
 
-const params = {
-	get() {
-
-		console.log( 'getting ctx', this );
-
-		return null;
-
-	}
-};
-
-Object.defineProperty( window, 'WebGLRenderingContext', params );
-Object.defineProperty( window, 'WebGL2RenderingContext', params );
+Object.defineProperty( window, 'WebGLRenderingContext', { get() { return null; } } );
+Object.defineProperty( window, 'WebGL2RenderingContext', { get() { return null; } } );
 
 let ctx;
 
@@ -217,7 +158,7 @@ window.addEventListener( 'keyup', function ( event ) {
 		case 'N' : espEnabled = ! espEnabled; break;
 		case 'B' : aimbotEnabled = ! aimbotEnabled; break;
 		case 'H' : xrayEnabled = ! xrayEnabled; break;
-		case 'J' : autobotEnabled = ! autobotEnabled; break; //🔥 綁定快捷鍵 J 開關機器人
+		case 'J' : autobotEnabled = ! autobotEnabled; break;
 
 	}
 
@@ -231,7 +172,8 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 		if ( ( aimbotEnabled || espEnabled || autobotEnabled ) && args[ 0 ] ) {
 			const src = args[ 0 ].src;
 
-			if ( src && (src.indexOf( 'loadout' ) > - 1 || src.indexOf( 'outfit' ) > - 1 || src.indexOf( 'player' ) > - 1) ) {
+			//🔥 修正 1：嚴格限制只抓 loadout 或是 outfit (服裝)，拔除 player 關鍵字以防抓到地上的裝備圖示
+			if ( src && typeof src === 'string' && (src.indexOf( 'loadout' ) > - 1 || src.indexOf( 'outfit' ) > - 1) ) {
 
 				const { a, b, e, f } = thisArgs.getTransform();
 
@@ -239,29 +181,25 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 				if (args.length === 9) drawHeight = args[8];
 				else if (args.length === 5) drawHeight = args[4];
 
-				if (drawHeight > 30 && drawHeight < 300) {
+				// 尺寸必須在 40 到 300 之間
+				if (drawHeight > 40 && drawHeight < 300) {
 
 					const centerX = thisArgs.canvas.width / 2;
 					const centerY = thisArgs.canvas.height / 2;
 					const distFromCenter = Math.hypot(e - centerX, f - centerY);
 
-					if ( distFromCenter <= 50 ) {
+					if ( distFromCenter <= 60 ) {
 						
-						//🔥 確保是合理的人物大小才更新基準
-						if (drawHeight >= 60 && drawHeight <= 200) {
+						if (drawHeight >= 60) {
 							myPlayerSize = drawHeight;
-							currentZoomScale = drawHeight / basePlayerSize;
 							myPos = { x: e, y: f };
 						}
 
 					} else {
 
-						let expectedSize = basePlayerSize * currentZoomScale;
-
-						//🔥 極度嚴格的尺寸過濾：誤差縮小到 10% 以內 (0.1)。
-						// 地上的槍枝、子彈、藥包絕對不會跟玩家一樣大，會被徹底過濾掉。
-						if ( Math.abs(drawHeight - expectedSize) < (expectedSize * 0.1) ) {
-							if ( Math.hypot(e - myPos.x, f - myPos.y) > 40 ) {
+						//🔥 修正 2：容忍敵人因為拿不同長度的武器，導致圖片大小在 0.4倍 ~ 1.6倍 之間浮動
+						if ( drawHeight > myPlayerSize * 0.4 && drawHeight < myPlayerSize * 1.6 ) {
+							if ( Math.hypot(e - myPos.x, f - myPos.y) > 50 ) {
 								radius = Math.hypot( a, b ) * drawHeight + 10;
 								players.push( { x: e, y: f } );
 							}
@@ -287,7 +225,7 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 				Reflect.apply( ...arguments );
 
-				//🔥 建立一個發送觸控事件的內部輔助函式，避免重複程式碼
+				//🔥 修正 3：為平板強化 Touch 注入器。除了 PointerEvent，也強制推入原生的 TouchEvent
 				const simulateTouch = (el, type, id, x, y) => {
 					if (typeof PointerEvent !== 'undefined') {
 						el.dispatchEvent(new PointerEvent(type, {
@@ -295,6 +233,16 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 							bubbles: true, cancelable: true, isPrimary: (id === 88), dispatchedByMe: true
 						}));
 					}
+					try {
+						if (typeof TouchEvent !== 'undefined' && typeof Touch !== 'undefined') {
+							const tType = type.replace('pointer', 'touch');
+							const touch = new Touch({ identifier: id, target: el, clientX: x, clientY: y, pageX: x, pageY: y, screenX: x, screenY: y });
+							el.dispatchEvent(new TouchEvent(tType, {
+								touches: [touch], targetTouches: [touch], changedTouches: [touch],
+								bubbles: true, cancelable: true, dispatchedByMe: true
+							}));
+						}
+					} catch (e) {}
 				};
 
 				ctx.fillStyle = '#fff';
@@ -337,7 +285,6 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 					lastTargetPos = null;
 
-					//🔥 沒人時鬆開搖桿
 					if (isSpoofingRightJoy) {
 						simulateTouch(targetElement, 'pointerup', 99, window.innerWidth * 0.75, window.innerHeight * 0.75);
 						isSpoofingRightJoy = false;
@@ -434,55 +381,46 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 					targetElement.dispatchEvent( new MouseEvent( 'mousemove', { clientX: screenX, clientY: screenY, bubbles: true, dispatchedByMe: true } ) );
 
-					if ( typeof PointerEvent !== 'undefined' ) {
+					if ( typeof PointerEvent !== 'undefined' || typeof TouchEvent !== 'undefined' ) {
 						
-						// --- 右半邊搖桿控制（射擊與自動瞄準） ---
 						const rightAngle = Math.atan2(predictY - myCharacterY, predictX - myCharacterX);
 						const rJoyCenterX = window.innerWidth * 0.75;
 						const rJoyCenterY = window.innerHeight * 0.75;
 						
-						//🔥 搖桿必須拉到足夠邊緣才會開火，這裡設定半徑 60
 						const rTouchX = rJoyCenterX + Math.cos(rightAngle) * 60;
 						const rTouchY = rJoyCenterY + Math.sin(rightAngle) * 60;
 
 						if (!isSpoofingRightJoy) {
-							//🔥 修正核心：必須先在「搖桿中心點」按下手指，讓遊戲設定原點
 							simulateTouch(targetElement, 'pointerdown', 99, rJoyCenterX, rJoyCenterY);
 							isSpoofingRightJoy = true;
 						}
-						//🔥 然後手指滑動到邊緣，觸發拖曳事件
 						simulateTouch(targetElement, 'pointermove', 99, rTouchX, rTouchY);
 
-						// --- 左半邊搖桿控制（走位） ---
 						if (autobotEnabled) {
 							
 							let leftAngle = rightAngle; 
 							
 							if (minDistance < 230) {
-								leftAngle = rightAngle + Math.PI; // 敵人太近，反向逃跑
+								leftAngle = rightAngle + Math.PI; // 拉扯後退
 							} else if (minDistance >= 230 && minDistance <= 420) {
-								leftAngle = rightAngle + Math.PI / 2; // 安全距離，橫向繞圈
+								leftAngle = rightAngle + Math.PI / 2; // 橫向躲子彈
 							} else {
-								leftAngle = rightAngle; // 距離太遠，往前追擊
+								leftAngle = rightAngle; // 追擊
 							}
 
 							const lJoyCenterX = window.innerWidth * 0.25;
 							const lJoyCenterY = window.innerHeight * 0.75;
 							
-							// 走位搖桿半徑拉滿 (60)
 							const lTouchX = lJoyCenterX + Math.cos(leftAngle) * 60;
 							const lTouchY = lJoyCenterY + Math.sin(leftAngle) * 60;
 
 							if (!isSpoofingLeftJoy) {
-								//🔥 先在左搖桿中心點按下手指
 								simulateTouch(targetElement, 'pointerdown', 88, lJoyCenterX, lJoyCenterY);
 								isSpoofingLeftJoy = true;
 							}
-							//🔥 滑動到邊緣觸發角色奔跑
 							simulateTouch(targetElement, 'pointermove', 88, lTouchX, lTouchY);
 
 						} else {
-							// 手動關閉 Bot 時釋放左搖桿
 							if (isSpoofingLeftJoy) {
 								simulateTouch(targetElement, 'pointerup', 88, window.innerWidth * 0.25, window.innerHeight * 0.75);
 								isSpoofingLeftJoy = false;

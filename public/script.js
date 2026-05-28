@@ -14,7 +14,6 @@ function loadUrl() {
     }
 }
 
-//🔥 新增：向伺服器請求抓取腳本文字的函式
 async function fetchScriptCode() {
     const scriptUrl = document.getElementById('script-url-input').value;
     const codeInput = document.getElementById('code-input');
@@ -58,5 +57,30 @@ function runScript() {
         outputElement.innerHTML += '腳本執行指令已送出。\n';
     } catch (error) {
         outputElement.innerHTML += '<span style="color: #ff5555;">執行失敗：' + error.message + '</span>\n';
+    }
+}
+
+//🔥 新增：處理進入與退出全螢幕的核心邏輯
+function toggleFullscreen() {
+    const iframe = document.getElementById('target-frame');
+    
+    if (!document.fullscreenElement) {
+        // 如果目前不是全螢幕，則要求 iframe 進入全螢幕
+        if (iframe.requestFullscreen) {
+            iframe.requestFullscreen();
+        } else if (iframe.webkitRequestFullscreen) { // 支援 Safari
+            iframe.webkitRequestFullscreen();
+        } else if (iframe.msRequestFullscreen) { // 支援 IE/Edge
+            iframe.msRequestFullscreen();
+        }
+    } else {
+        // 如果已經是全螢幕，則要求整份文件退出全螢幕
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) { // 支援 Safari
+            document.webkitExitFullscreen();
+        } else if (document.msExitFullscreen) { // 支援 IE/Edge
+            document.msExitFullscreen();
+        }
     }
 }

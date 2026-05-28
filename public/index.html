@@ -17,6 +17,11 @@
         
         <iframe id="target-frame" src="about:blank"></iframe>
         
+        <div class="url-bar">
+            <input type="text" id="script-url-input" placeholder="請輸入腳本原始碼網址 (例如：.user.js 的連結)">
+            <button onclick="fetchScriptCode()">載入腳本程式碼</button>
+        </div>
+        
         <textarea id="code-input" placeholder="請在此輸入要在上方網頁執行的 JavaScript 程式碼...&#10;例如：document.body.style.backgroundColor = 'lightblue';"></textarea>
         <button onclick="runScript()">在網頁上執行腳本</button>
         

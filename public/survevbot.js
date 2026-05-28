@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Surviv.IO Aimbot, ESP & X-Ray (Tablet AI Bot)
 // @namespace    https://greasyfork.org/en/users/662330-zertalious
-// @version      0.0.9
-// @description  Fully automated AI battle bot for tablet users with safety distance control and lead prediction.
-// @author       Zertalious (Zert)
+// @version      0.1.1
+// @description  Advanced heuristic pattern recognition bot for obfuscated private servers.
+// @author       Zertalious (Zert) & Enhanced Logic
 // @match        *://surviv.io/*
 // @match        *://surviv2.io/*
 // @match        *://2dbattleroyale.com/*
@@ -170,42 +170,53 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 	apply( target, thisArgs, args ) {
 
 		if ( ( aimbotEnabled || espEnabled || autobotEnabled ) && args[ 0 ] ) {
-			const src = args[ 0 ].src;
 
-			//🔥 修正 1：嚴格限制只抓 loadout 或是 outfit (服裝)，拔除 player 關鍵字以防抓到地上的裝備圖示
-			if ( src && typeof src === 'string' && (src.indexOf( 'loadout' ) > - 1 || src.indexOf( 'outfit' ) > - 1) ) {
+			//🔥 演算法 AI：完全拔除對圖片名稱 (src) 的依賴，直接分析繪圖矩陣與幾何特徵
+			const { a, b, e, f } = thisArgs.getTransform();
 
-				const { a, b, e, f } = thisArgs.getTransform();
+			let drawWidth = 0;
+			let drawHeight = 0;
 
-				let drawHeight = 142; 
-				if (args.length === 9) drawHeight = args[8];
-				else if (args.length === 5) drawHeight = args[4];
+			// 動態解析繪圖參數
+			if (args.length === 9) {
+				drawWidth = args[7];
+				drawHeight = args[8];
+			} else if (args.length === 5) {
+				drawWidth = args[3];
+				drawHeight = args[4];
+			} else if (args[0]) {
+				drawWidth = args[0].width || 0;
+				drawHeight = args[0].height || 0;
+			}
 
-				// 尺寸必須在 40 到 300 之間
-				if (drawHeight > 40 && drawHeight < 300) {
+			//🔥 特徵 1：玩家圖形通常是正方形（寬高比例接近 1:1，容許微小誤差）
+			const isSquareLike = (drawWidth > 0 && drawHeight > 0) && (Math.abs(drawWidth - drawHeight) < 20);
 
-					const centerX = thisArgs.canvas.width / 2;
-					const centerY = thisArgs.canvas.height / 2;
-					const distFromCenter = Math.hypot(e - centerX, f - centerY);
+			if (isSquareLike && drawHeight > 40 && drawHeight < 300) {
 
-					if ( distFromCenter <= 60 ) {
-						
-						if (drawHeight >= 60) {
-							myPlayerSize = drawHeight;
-							myPos = { x: e, y: f };
-						}
+				const centerX = thisArgs.canvas.width / 2;
+				const centerY = thisArgs.canvas.height / 2;
+				const distFromCenter = Math.hypot(e - centerX, f - centerY);
 
-					} else {
-
-						//🔥 修正 2：容忍敵人因為拿不同長度的武器，導致圖片大小在 0.4倍 ~ 1.6倍 之間浮動
-						if ( drawHeight > myPlayerSize * 0.4 && drawHeight < myPlayerSize * 1.6 ) {
-							if ( Math.hypot(e - myPos.x, f - myPos.y) > 50 ) {
-								radius = Math.hypot( a, b ) * drawHeight + 10;
-								players.push( { x: e, y: f } );
-							}
-						}
-
+				//🔥 特徵 2：畫面正中央永遠是你自己。以此為絕對基準。
+				if ( distFromCenter <= 60 ) {
+					
+					if (drawHeight >= 60) {
+						myPlayerSize = drawHeight;
+						myPos = { x: e, y: f };
 					}
+
+				} else {
+
+					//🔥 特徵 3：敵人的大小應該與你在同一個量級 (0.4 ~ 1.6 倍)
+					if ( drawHeight > myPlayerSize * 0.4 && drawHeight < myPlayerSize * 1.6 ) {
+						// 確保不是自己的殘影
+						if ( Math.hypot(e - myPos.x, f - myPos.y) > 50 ) {
+							radius = Math.hypot( a, b ) * drawHeight + 10;
+							players.push( { x: e, y: f } );
+						}
+					}
+
 				}
 			}
 		}
@@ -225,7 +236,6 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 				Reflect.apply( ...arguments );
 
-				//🔥 修正 3：為平板強化 Touch 注入器。除了 PointerEvent，也強制推入原生的 TouchEvent
 				const simulateTouch = (el, type, id, x, y) => {
 					if (typeof PointerEvent !== 'undefined') {
 						el.dispatchEvent(new PointerEvent(type, {
@@ -285,13 +295,35 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 					lastTargetPos = null;
 
-					if (isSpoofingRightJoy) {
-						simulateTouch(targetElement, 'pointerup', 99, window.innerWidth * 0.75, window.innerHeight * 0.75);
-						isSpoofingRightJoy = false;
-					}
-					if (isSpoofingLeftJoy) {
-						simulateTouch(targetElement, 'pointerup', 88, window.innerWidth * 0.25, window.innerHeight * 0.75);
-						isSpoofingLeftJoy = false;
+					if (autobotEnabled) {
+						
+						const patrolTime = Date.now() * 0.001;
+						const patrolAngle = patrolTime;
+						const lJoyCenterX = window.innerWidth * 0.25;
+						const lJoyCenterY = window.innerHeight * 0.75;
+						const pTouchX = lJoyCenterX + Math.cos(patrolAngle) * 30; 
+						const pTouchY = lJoyCenterY + Math.sin(patrolAngle) * 30;
+
+						if (!isSpoofingLeftJoy) {
+							simulateTouch(targetElement, 'pointerdown', 88, lJoyCenterX, lJoyCenterY);
+							isSpoofingLeftJoy = true;
+						}
+						simulateTouch(targetElement, 'pointermove', 88, pTouchX, pTouchY);
+
+						if (isSpoofingRightJoy) {
+							simulateTouch(targetElement, 'pointerup', 99, window.innerWidth * 0.75, window.innerHeight * 0.75);
+							isSpoofingRightJoy = false;
+						}
+
+					} else {
+						if (isSpoofingRightJoy) {
+							simulateTouch(targetElement, 'pointerup', 99, window.innerWidth * 0.75, window.innerHeight * 0.75);
+							isSpoofingRightJoy = false;
+						}
+						if (isSpoofingLeftJoy) {
+							simulateTouch(targetElement, 'pointerup', 88, window.innerWidth * 0.25, window.innerHeight * 0.75);
+							isSpoofingLeftJoy = false;
+						}
 					}
 
 					return;
@@ -399,13 +431,15 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 						if (autobotEnabled) {
 							
 							let leftAngle = rightAngle; 
+							const aiTime = Date.now() * 0.005;
+							const evasiveManeuver = Math.sin(aiTime) * 0.8;
 							
 							if (minDistance < 230) {
-								leftAngle = rightAngle + Math.PI; // 拉扯後退
+								leftAngle = rightAngle + Math.PI + evasiveManeuver; 
 							} else if (minDistance >= 230 && minDistance <= 420) {
-								leftAngle = rightAngle + Math.PI / 2; // 橫向躲子彈
+								leftAngle = rightAngle + (Math.PI / 2) * (Math.sin(aiTime) > 0 ? 1 : -1); 
 							} else {
-								leftAngle = rightAngle; // 追擊
+								leftAngle = rightAngle + evasiveManeuver * 0.5; 
 							}
 
 							const lJoyCenterX = window.innerWidth * 0.25;

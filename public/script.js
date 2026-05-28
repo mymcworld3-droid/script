@@ -4,14 +4,59 @@ function loadUrl() {
     const outputElement = document.getElementById('output');
     
     if (url) {
-        //🔥 改為透過我們架設的 proxy 伺服器載入
         const proxyUrl = '/proxy?url=' + encodeURIComponent(url);
         iframe.src = proxyUrl;
         
-        //🔥 更新提示文字
         outputElement.innerHTML = '嘗試透過代理伺服器載入：' + url + '\n';
         outputElement.innerHTML += '【系統提示】網頁載入中，現在 iframe 與主網頁屬於同源 (localhost)，腳本將可正常執行。\n';
     } else {
         outputElement.innerHTML = '請先輸入網址。\n';
+    }
+}
+
+//🔥 新增：向伺服器請求抓取腳本文字的函式
+async function fetchScriptCode() {
+    const scriptUrl = document.getElementById('script-url-input').value;
+    const codeInput = document.getElementById('code-input');
+    const outputElement = document.getElementById('output');
+    
+    if (!scriptUrl) {
+        outputElement.innerHTML += '請先輸入腳本網址。\n';
+        return;
+    }
+    
+    outputElement.innerHTML += '\n嘗試下載腳本：' + scriptUrl + '\n';
+    
+    try {
+        const response = await fetch('/fetch-script?url=' + encodeURIComponent(scriptUrl));
+        
+        if (!response.ok) {
+            throw new Error(`伺服器回應狀態碼 ${response.status}`);
+        }
+        
+        const code = await response.text();
+        codeInput.value = code;
+        outputElement.innerHTML += '腳本下載成功！已經填入下方輸入框。\n';
+        
+    } catch (error) {
+        outputElement.innerHTML += '<span style="color: #ff5555;">下載失敗：' + error.message + '</span>\n';
+    }
+}
+
+function runScript() {
+    const code = document.getElementById('code-input').value;
+    const iframe = document.getElementById('target-frame');
+    const outputElement = document.getElementById('output');
+    
+    outputElement.innerHTML += '\n--- 準備執行腳本 ---\n';
+    
+    try {
+        const iframeWindow = iframe.contentWindow;
+        
+        iframeWindow.eval(code);
+        
+        outputElement.innerHTML += '腳本執行指令已送出。\n';
+    } catch (error) {
+        outputElement.innerHTML += '<span style="color: #ff5555;">執行失敗：' + error.message + '</span>\n';
     }
 }

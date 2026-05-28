@@ -178,28 +178,37 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 			
 			const imgWidth = img.width || 0;
 			const imgHeight = img.height || 0;
-			if (imgWidth > 0 && imgHeight > 0 && Math.abs(imgWidth - imgHeight) > 2) {
-				return Reflect.apply( ...arguments );
+			
+			if (imgWidth > 0 && imgHeight > 0) {
+				//🔥 嚴格防護 1：過濾過小的「原始圖片」。
+				// 玩家衣服原始圖檔通常大於 50x50。花瓣、子彈通常是 16 或 32 等低解析度貼圖。
+				if (imgWidth < 50 || imgHeight < 50) {
+					return Reflect.apply( ...arguments );
+				}
+				// 確保是正方形 (誤差 2 像素內)
+				if (Math.abs(imgWidth - imgHeight) > 2) {
+					return Reflect.apply( ...arguments );
+				}
 			}
 
 			const src = img.src || '';
 			if (typeof src === 'string') {
 				const lowerSrc = src.toLowerCase();
-				if (lowerSrc.includes('petal') || lowerSrc.includes('leaf') || lowerSrc.includes('particle') || lowerSrc.includes('smoke')) {
+				//🔥 加入 bullet(子彈), laser(雷射) 等更多黑名單
+				if (lowerSrc.includes('petal') || lowerSrc.includes('leaf') || lowerSrc.includes('particle') || lowerSrc.includes('smoke') || lowerSrc.includes('bullet') || lowerSrc.includes('laser')) {
 					return Reflect.apply( ...arguments );
 				}
 			}
 
 			const { a, b, e, f } = thisArgs.getTransform();
-			
-			//🔥 核心更新：利用 atan2 從渲染矩陣中反推該圖片目前的「旋轉角度 (面向方向)」
 			const currentAngle = Math.atan2(b, a);
 
 			let drawHeight = 142; 
 			if (args.length === 9) drawHeight = args[8];
 			else if (args.length === 5) drawHeight = args[4];
 
-			if (drawHeight > 40 && drawHeight < 300) {
+			//🔥 嚴格防護 2：提高渲染的絕對最小門檻 (從 40 提高到 70)
+			if (drawHeight > 70 && drawHeight < 300) {
 
 				const centerX = thisArgs.canvas.width / 2;
 				const centerY = thisArgs.canvas.height / 2;
@@ -207,16 +216,17 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 
 				if ( distFromCenter <= 1 ) {
 					
-					if (drawHeight >= 60) {
+					if (drawHeight >= 70) {
 						myPlayerSize = drawHeight;
 					}
 
 				} else {
 
-					if ( drawHeight > myPlayerSize * 0.5 && drawHeight < myPlayerSize * 1.5 ) {
+					//🔥 嚴格防護 3：將相對大小的容忍範圍縮緊，從 0.5~1.5 縮小至 0.7~1.3 倍。
+					// 小物件即使被遊戲引擎放大，也很難達到玩家體型的 70%
+					if ( drawHeight > myPlayerSize * 0.7 && drawHeight < myPlayerSize * 1.3 ) {
 						if ( distFromCenter > 40 ) {
 							radius = Math.hypot( a, b ) * drawHeight + 10;
-							//🔥 將提取出來的旋轉角度 (angle) 一併存入，交給 AI 判斷
 							players.push( { x: e, y: f, angle: currentAngle } );
 						}
 					}

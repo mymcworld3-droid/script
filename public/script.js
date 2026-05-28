@@ -85,6 +85,7 @@ async function runScript() {
     }
 }
 
+//🔥 修改：移除了取消全螢幕的邏輯，現在只負責進入全螢幕
 function toggleFullscreen() {
     const iframe = document.getElementById('target-frame');
     
@@ -95,14 +96,6 @@ function toggleFullscreen() {
             iframe.webkitRequestFullscreen();
         } else if (iframe.msRequestFullscreen) {
             iframe.msRequestFullscreen();
-        }
-    } else {
-        if (document.exitFullscreen) {
-            document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-            document.webkitExitFullscreen();
-        } else if (document.msExitFullscreen) {
-            document.msExitFullscreen();
         }
     }
 }

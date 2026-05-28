@@ -288,13 +288,23 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 				Reflect.apply( ...arguments );
 
+				//🔥 建立一個發送觸控事件的內部輔助函式，避免重複程式碼
+				const simulateTouch = (el, type, id, x, y) => {
+					if (typeof PointerEvent !== 'undefined') {
+						el.dispatchEvent(new PointerEvent(type, {
+							pointerId: id, pointerType: 'touch', clientX: x, clientY: y, 
+							bubbles: true, cancelable: true, isPrimary: (id === 88), dispatchedByMe: true
+						}));
+					}
+				};
+
 				ctx.fillStyle = '#fff';
 
 				const array = [
 					[ '[B] Aimbot', aimbotEnabled ],
 					[ '[N] ESP', espEnabled ],
 					[ '[H] X-Ray', xrayEnabled ],
-					[ '[J] Auto-Bot', autobotEnabled ] //🔥 介面顯示機器人狀態
+					[ '[J] Auto-Bot', autobotEnabled ]
 				];
 
 				const fontSize = 20;
@@ -307,9 +317,7 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 				for ( let i = 0; i < array.length; i ++ ) {
 
 					const [ text, status ] = array[ i ];
-
 					ctx.globalAlpha = status ? 1 : 0.5;
-
 					ctx.fillText( text + ': ' + ( status ? 'ON' : 'OFF' ), ctx.canvas.width / 2, 10 + i * fontSize );
 
 				}
@@ -330,259 +338,156 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 					lastTargetPos = null;
 
-					//🔥 當畫面上沒有敵人時，自動鬆開所有走位按鍵與停火
-					if (autobotEnabled) {
-						setKey('W', false); setKey('A', false); setKey('S', false); setKey('D', false);
-						setShooting(targetElement, false, mouseX, mouseY);
+					//🔥 沒人時鬆開搖桿
+					if (isSpoofingRightJoy) {
+						simulateTouch(targetElement, 'pointerup', 99, window.innerWidth * 0.75, window.innerHeight * 0.75);
+						isSpoofingRightJoy = false;
 					}
-
-					if (isSpoofingTouch) {
-						
-						if (typeof PointerEvent !== 'undefined') {
-							const ptrUpDict = { pointerId: 99, pointerType: 'touch', bubbles: true, cancelable: true, dispatchedByMe: true };
-							targetElement.dispatchEvent(new PointerEvent('pointerup', ptrUpDict));
-							window.dispatchEvent(new PointerEvent('pointerup', ptrUpDict));
-						}
-
-						try {
-							if (typeof TouchEvent !== 'undefined' && lastFakeTouch) {
-								const touchEndDict = {
-									touches: [],
-									targetTouches: [],
-									changedTouches: [lastFakeTouch],
-									bubbles: true,
-									cancelable: true,
-									dispatchedByMe: true
-								};
-								targetElement.dispatchEvent(new TouchEvent('touchend', touchEndDict));
-								window.dispatchEvent(new TouchEvent('touchend', touchEndDict));
-							}
-						} catch(e) {}
-						
-						isSpoofingTouch = false;
-						lastFakeTouch = null;
+					if (isSpoofingLeftJoy) {
+						simulateTouch(targetElement, 'pointerup', 88, window.innerWidth * 0.25, window.innerHeight * 0.75);
+						isSpoofingLeftJoy = false;
 					}
 
 					return;
 
 				}
 
-				ctx.lineWidth = 5;
-				ctx.strokeStyle = 'red';
+				let minDistance = Infinity;
+				let targetPlayer = null;
 
-				if ( espEnabled ) {
+				const myCharacterX = myPos.x !== 0 ? myPos.x : ctx.canvas.width / 2;
+				const myCharacterY = myPos.y !== 0 ? myPos.y : ctx.canvas.height / 2;
 
-					const centerX = ctx.canvas.width / 2;
-					const centerY = ctx.canvas.height / 2;
+				for ( let i = 0; i < players.length; i ++ ) {
 
-					ctx.beginPath();
+					const player = players[ i ];
+					const distance = Math.hypot( player.x - myCharacterX, player.y - myCharacterY );
 
-					for ( let i = 0; i < players.length; i ++ ) {
-
-						const player = players[ i ];
-
-						ctx.moveTo( centerX, centerY );
-
-						ctx.lineTo( player.x, player.y );
-
+					if ( distance < minDistance ) {
+						minDistance = distance;
+						targetPlayer = player;
 					}
-
-					ctx.stroke();
 
 				}
 
-				if ( aimbotEnabled || autobotEnabled ) {
+				if ( espEnabled && targetPlayer ) {
 
-					let minDistance = Infinity;
-					let targetPlayer = null;
+					ctx.lineWidth = 5;
+					ctx.strokeStyle = autobotEnabled ? '#ffeb3b' : 'red';
 
-					const myCharacterX = ctx.canvas.width / 2;
-					const myCharacterY = ctx.canvas.height / 2;
+					ctx.beginPath();
+					ctx.moveTo( myCharacterX, myCharacterY );
+					ctx.lineTo( targetPlayer.x, targetPlayer.y );
+					ctx.stroke();
 
 					for ( let i = 0; i < players.length; i ++ ) {
-
-						const player = players[ i ];
-
-						const distance = Math.hypot( player.x - myCharacterX, player.y - myCharacterY );
-
-						if ( distance < minDistance ) {
-
-							minDistance = distance;
-							targetPlayer = player;
-
+						const p = players[ i ];
+						if (p !== targetPlayer) {
+							ctx.strokeStyle = 'red';
+							ctx.beginPath();
+							ctx.moveTo( myCharacterX, myCharacterY );
+							ctx.lineTo( p.x, p.y );
+							ctx.stroke();
 						}
-
 					}
 
-					if ( targetPlayer ) {
-						
-						let predictX = targetPlayer.x;
-						let predictY = targetPlayer.y;
+				}
 
-						if ( lastTargetPos ) {
-							const velocityX = targetPlayer.x - lastTargetPos.x;
-							const velocityY = targetPlayer.y - lastTargetPos.y;
-							
-							const moveDistance = Math.hypot(velocityX, velocityY);
-							
-							if ( moveDistance < 50 ) { 
-								const bulletTravelTime = (minDistance / 100) * predictionFactor;
-								
-								predictX += velocityX * bulletTravelTime;
-								predictY += velocityY * bulletTravelTime;
-							}
-						}
-
-						lastTargetPos = { x: targetPlayer.x, y: targetPlayer.y };
-
-						ctx.beginPath();
-						ctx.arc( predictX, predictY, radius, 0, Math.PI * 2 );
-						ctx.stroke();
-
-						let screenX = predictX;
-						let screenY = predictY;
-
-						if (ctx.canvas) {
-							const now = Date.now();
-							if (!cachedRect || now - lastRectTime > 1000) {
-								cachedRect = ctx.canvas.getBoundingClientRect();
-								lastRectTime = now;
-							}
-
-							const scaleX = cachedRect.width / ctx.canvas.width;
-							const scaleY = cachedRect.height / ctx.canvas.height;
-							screenX = (predictX * scaleX) + cachedRect.left;
-							screenY = (predictY * scaleY) + cachedRect.top;
-						}
-
-						targetElement.dispatchEvent( new MouseEvent( 'mousemove', {
-							clientX: screenX,
-							clientY: screenY,
-							bubbles: true,
-							cancelable: true,
-							dispatchedByMe: true
-						} ) );
-						window.dispatchEvent( new MouseEvent( 'mousemove', {
-							clientX: screenX,
-							clientY: screenY,
-							bubbles: true,
-							cancelable: true,
-							dispatchedByMe: true
-						} ) );
-
-						//🔥 全自動機器人邏輯執行區塊
-						if (autobotEnabled) {
-							// 1. 自動射擊
-							setShooting(targetElement, true, screenX, screenY);
-
-							// 2. 自動走位追擊 (利用鍵盤事件模擬)
-							// 如果敵人距離大於 150 像素，就朝他走過去
-							if (minDistance > 150) {
-								setKey('W', targetPlayer.y < myCharacterY - 20); // 敵人在上方
-								setKey('S', targetPlayer.y > myCharacterY + 20); // 敵人在下方
-								setKey('A', targetPlayer.x < myCharacterX - 20); // 敵人在左方
-								setKey('D', targetPlayer.x > myCharacterX + 20); // 敵人在右方
-							} else {
-								// 靠太近就停下腳步開火
-								setKey('W', false); setKey('A', false); setKey('S', false); setKey('D', false);
-							}
-						}
-
-						const angle = Math.atan2(predictY - myCharacterY, predictX - myCharacterX);
-						const touchCenterX = window.innerWidth * 0.75;
-						const touchCenterY = window.innerHeight * 0.75;
-						const touchX = touchCenterX + Math.cos(angle) * 50;
-						const touchY = touchCenterY + Math.sin(angle) * 50;
-
-						if ( typeof PointerEvent !== 'undefined' ) {
-							const ptrEventDict = {
-								clientX: touchX,
-								clientY: touchY,
-								bubbles: true,
-								cancelable: true,
-								pointerId: 99, 
-								pointerType: 'touch',
-								isPrimary: true,
-								dispatchedByMe: true
-							};
-							
-							if (!isSpoofingTouch) {
-								targetElement.dispatchEvent(new PointerEvent('pointerdown', ptrEventDict));
-								window.dispatchEvent(new PointerEvent('pointerdown', ptrEventDict));
-							}
-							
-							targetElement.dispatchEvent(new PointerEvent('pointermove', ptrEventDict));
-							window.dispatchEvent(new PointerEvent('pointermove', ptrEventDict));
-						}
-
-						try {
-							if ( typeof TouchEvent !== 'undefined' && typeof Touch !== 'undefined' ) {
-								lastFakeTouch = new Touch({
-									identifier: 99999,
-									target: targetElement,
-									clientX: touchX,
-									clientY: touchY,
-									pageX: touchX + window.scrollX,
-									pageY: touchY + window.scrollY,
-									screenX: touchX,
-									screenY: touchY
-								});
-								
-								const touchEventDict = {
-									touches: [lastFakeTouch],
-									targetTouches: [lastFakeTouch],
-									changedTouches: [lastFakeTouch],
-									bubbles: true,
-									cancelable: true,
-									dispatchedByMe: true
-								};
-
-								if (!isSpoofingTouch) {
-									targetElement.dispatchEvent(new TouchEvent('touchstart', touchEventDict));
-									window.dispatchEvent(new TouchEvent('touchstart', touchEventDict));
-								}
-								
-								targetElement.dispatchEvent(new TouchEvent('touchmove', touchEventDict));
-								window.dispatchEvent(new TouchEvent('touchmove', touchEventDict));
-							}
-						} catch(e) {}
-
-						isSpoofingTouch = true;
+				if ( (aimbotEnabled || autobotEnabled) && targetPlayer ) {
 					
-					} else {
-						lastTargetPos = null;
-						
-						//🔥 沒有鎖定目標時鬆開按鍵與停火
-						if (autobotEnabled) {
-							setKey('W', false); setKey('A', false); setKey('S', false); setKey('D', false);
-							setShooting(targetElement, false, mouseX, mouseY);
-						}
+					let predictX = targetPlayer.x;
+					let predictY = targetPlayer.y;
 
-						if (isSpoofingTouch) {
+					if ( lastTargetPos ) {
+						const velocityX = targetPlayer.x - lastTargetPos.x;
+						const velocityY = targetPlayer.y - lastTargetPos.y;
+						
+						const moveDistance = Math.hypot(velocityX, velocityY);
+						
+						if ( moveDistance < 50 ) { 
+							const bulletTravelTime = (minDistance / 100) * predictionFactor;
+							predictX += velocityX * bulletTravelTime;
+							predictY += velocityY * bulletTravelTime;
+						}
+					}
+
+					lastTargetPos = { x: targetPlayer.x, y: targetPlayer.y };
+
+					ctx.beginPath();
+					ctx.strokeStyle = autobotEnabled ? '#ffeb3b' : 'red'; 
+					ctx.arc( predictX, predictY, radius, 0, Math.PI * 2 );
+					ctx.stroke();
+
+					let screenX = predictX;
+					let screenY = predictY;
+
+					if (ctx.canvas) {
+						const now = Date.now();
+						if (!cachedRect || now - lastRectTime > 1000) {
+							cachedRect = ctx.canvas.getBoundingClientRect();
+							lastRectTime = now;
+						}
+						const scaleX = cachedRect.width / ctx.canvas.width;
+						const scaleY = cachedRect.height / ctx.canvas.height;
+						screenX = (predictX * scaleX) + cachedRect.left;
+						screenY = (predictY * scaleY) + cachedRect.top;
+					}
+
+					targetElement.dispatchEvent( new MouseEvent( 'mousemove', { clientX: screenX, clientY: screenY, bubbles: true, dispatchedByMe: true } ) );
+
+					if ( typeof PointerEvent !== 'undefined' ) {
+						
+						// --- 右半邊搖桿控制（射擊與自動瞄準） ---
+						const rightAngle = Math.atan2(predictY - myCharacterY, predictX - myCharacterX);
+						const rJoyCenterX = window.innerWidth * 0.75;
+						const rJoyCenterY = window.innerHeight * 0.75;
+						
+						//🔥 搖桿必須拉到足夠邊緣才會開火，這裡設定半徑 60
+						const rTouchX = rJoyCenterX + Math.cos(rightAngle) * 60;
+						const rTouchY = rJoyCenterY + Math.sin(rightAngle) * 60;
+
+						if (!isSpoofingRightJoy) {
+							//🔥 修正核心：必須先在「搖桿中心點」按下手指，讓遊戲設定原點
+							simulateTouch(targetElement, 'pointerdown', 99, rJoyCenterX, rJoyCenterY);
+							isSpoofingRightJoy = true;
+						}
+						//🔥 然後手指滑動到邊緣，觸發拖曳事件
+						simulateTouch(targetElement, 'pointermove', 99, rTouchX, rTouchY);
+
+						// --- 左半邊搖桿控制（走位） ---
+						if (autobotEnabled) {
 							
-							if (typeof PointerEvent !== 'undefined') {
-								const ptrUpDict = { pointerId: 99, pointerType: 'touch', bubbles: true, cancelable: true, dispatchedByMe: true };
-								targetElement.dispatchEvent(new PointerEvent('pointerup', ptrUpDict));
-								window.dispatchEvent(new PointerEvent('pointerup', ptrUpDict));
+							let leftAngle = rightAngle; 
+							
+							if (minDistance < 230) {
+								leftAngle = rightAngle + Math.PI; // 敵人太近，反向逃跑
+							} else if (minDistance >= 230 && minDistance <= 420) {
+								leftAngle = rightAngle + Math.PI / 2; // 安全距離，橫向繞圈
+							} else {
+								leftAngle = rightAngle; // 距離太遠，往前追擊
 							}
 
-							try {
-								if (typeof TouchEvent !== 'undefined' && lastFakeTouch) {
-									const touchEndDict = {
-										touches: [],
-										targetTouches: [],
-										changedTouches: [lastFakeTouch],
-										bubbles: true,
-										cancelable: true,
-										dispatchedByMe: true
-									};
-									targetElement.dispatchEvent(new TouchEvent('touchend', touchEndDict));
-									window.dispatchEvent(new TouchEvent('touchend', touchEndDict));
-								}
-							} catch(e) {}
+							const lJoyCenterX = window.innerWidth * 0.25;
+							const lJoyCenterY = window.innerHeight * 0.75;
 							
-							isSpoofingTouch = false;
-							lastFakeTouch = null;
+							// 走位搖桿半徑拉滿 (60)
+							const lTouchX = lJoyCenterX + Math.cos(leftAngle) * 60;
+							const lTouchY = lJoyCenterY + Math.sin(leftAngle) * 60;
+
+							if (!isSpoofingLeftJoy) {
+								//🔥 先在左搖桿中心點按下手指
+								simulateTouch(targetElement, 'pointerdown', 88, lJoyCenterX, lJoyCenterY);
+								isSpoofingLeftJoy = true;
+							}
+							//🔥 滑動到邊緣觸發角色奔跑
+							simulateTouch(targetElement, 'pointermove', 88, lTouchX, lTouchY);
+
+						} else {
+							// 手動關閉 Bot 時釋放左搖桿
+							if (isSpoofingLeftJoy) {
+								simulateTouch(targetElement, 'pointerup', 88, window.innerWidth * 0.25, window.innerHeight * 0.75);
+								isSpoofingLeftJoy = false;
+							}
 						}
 					}
 

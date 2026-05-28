@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Surviv.IO Aimbot, ESP & X-Ray (Tablet AI Bot)
 // @namespace    https://greasyfork.org/en/users/662330-zertalious
-// @version      0.1.2
-// @description  Advanced heuristic pattern recognition bot with strict center lock and circular ratio filtering.
+// @version      0.1.3
+// @description  Advanced heuristic bot with vitality tracking (anti-static) and CQC Berserker Chase.
 // @author       Zertalious (Zert) & Enhanced Logic
 // @match        *://surviv.io/*
 // @match        *://surviv2.io/*
@@ -40,6 +40,10 @@ let cachedRect = null;
 let lastRectTime = 0;
 
 let myPlayerSize = 142;
+
+//🔥 AI 生命特徵追蹤器陣列
+let entityTrackers = [];
+let nextEntityId = 1;
 
 window.toggleAimbot = function() { aimbotEnabled = !aimbotEnabled; };
 window.toggleESP = function() { espEnabled = !espEnabled; };
@@ -172,15 +176,12 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 			
 			const img = args[ 0 ];
 			
-			//🔥 幾何特徵過濾 1：確保圖片是寬高接近相等的正方形 (圓形的玩家一定存在於 1:1 的圖片中)
-			// 櫻花花瓣、大部分長管槍枝皆不符合此特徵，會在此被直接拋棄
 			const imgWidth = img.width || 0;
 			const imgHeight = img.height || 0;
 			if (imgWidth > 0 && imgHeight > 0 && Math.abs(imgWidth - imgHeight) > 2) {
 				return Reflect.apply( ...arguments );
 			}
 
-			//🔥 幾何特徵過濾 2：關鍵字黑名單防禦
 			const src = img.src || '';
 			if (typeof src === 'string') {
 				const lowerSrc = src.toLowerCase();
@@ -201,7 +202,6 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 				const centerY = thisArgs.canvas.height / 2;
 				const distFromCenter = Math.hypot(e - centerX, f - centerY);
 
-				//🔥 絕對中央基準法：只要不是完美的 1 像素內誤差，就絕不是你自己
 				if ( distFromCenter <= 1 ) {
 					
 					if (drawHeight >= 60) {
@@ -211,10 +211,10 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 				} else {
 
 					if ( drawHeight > myPlayerSize * 0.5 && drawHeight < myPlayerSize * 1.5 ) {
-						// 確保不在正中央的殘影區
 						if ( distFromCenter > 40 ) {
 							radius = Math.hypot( a, b ) * drawHeight + 10;
-							players.push( { x: e, y: f } );
+							//🔥 加入 drawHeight 紀錄，以供後續呼吸動畫追蹤
+							players.push( { x: e, y: f, h: drawHeight } );
 						}
 					}
 
@@ -233,8 +233,43 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 		args[ 0 ] = new Proxy( args[ 0 ], {
 			apply( target, thisArgs, args ) {
 
-				players.length = 0;
+				//🔥 AI 生命特徵分析器：過濾不會動的死物 (箱子、石頭)
+				let currentEntities = [];
+				for ( let i = 0; i < players.length; i ++ ) {
+					const p = players[ i ];
+					let bestMatch = null;
+					let bestDist = Infinity;
+					
+					// 尋找上一幀的同一個目標
+					for (let t of entityTrackers) {
+						let d = Math.hypot(p.x - t.x, p.y - t.y);
+						if (d < 50 && d < bestDist) {
+							bestDist = d;
+							bestMatch = t;
+						}
+					}
+					
+					if (bestMatch) {
+						// 真實玩家會有呼吸動畫，尺寸會微幅變化。死物尺寸永遠不變。
+						if (Math.abs(bestMatch.lastH - p.h) > 0.05) {
+							bestMatch.isAlive = true; // 判定為活體玩家！
+						}
+						bestMatch.lastH = p.h;
+						bestMatch.x = p.x;
+						bestMatch.y = p.y;
+						bestMatch.frames++;
+						currentEntities.push(bestMatch);
+					} else {
+						// 新目標，先給予 30 幀的觀察期
+						currentEntities.push({ id: nextEntityId++, x: p.x, y: p.y, lastH: p.h, isAlive: false, frames: 0 });
+					}
+				}
+				entityTrackers = currentEntities;
 
+				//🔥 絕對剔除法則：觀察期超過 30 幀且無生命特徵 (不會動/不呼吸)，直接丟棄！
+				let validTargets = entityTrackers.filter(e => e.isAlive || e.frames < 30);
+
+				players.length = 0;
 				Reflect.apply( ...arguments );
 
 				const simulateTouch = (el, type, id, x, y) => {
@@ -282,7 +317,6 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 				ctx.globalAlpha = 1;
 
-				//🔥 鎖定絕對中央畫藍圈
 				const exactCenterX = ctx.canvas.width / 2;
 				const exactCenterY = ctx.canvas.height / 2;
 
@@ -294,7 +328,7 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 				const targetElement = ctx.canvas ? ctx.canvas : window;
 
-				if ( players.length === 0 ) {
+				if ( validTargets.length === 0 ) {
 
 					lastTargetPos = null;
 
@@ -336,9 +370,10 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 				let minDistance = Infinity;
 				let targetPlayer = null;
 
-				for ( let i = 0; i < players.length; i ++ ) {
+				//🔥 只鎖定「會動的有效目標」
+				for ( let i = 0; i < validTargets.length; i ++ ) {
 
-					const player = players[ i ];
+					const player = validTargets[ i ];
 					const distance = Math.hypot( player.x - exactCenterX, player.y - exactCenterY );
 
 					if ( distance < minDistance ) {
@@ -358,8 +393,8 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 					ctx.lineTo( targetPlayer.x, targetPlayer.y );
 					ctx.stroke();
 
-					for ( let i = 0; i < players.length; i ++ ) {
-						const p = players[ i ];
+					for ( let i = 0; i < validTargets.length; i ++ ) {
+						const p = validTargets[ i ];
 						if (p !== targetPlayer) {
 							ctx.strokeStyle = 'red';
 							ctx.beginPath();
@@ -434,9 +469,10 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 							const aiTime = Date.now() * 0.005;
 							const evasiveManeuver = Math.sin(aiTime) * 0.8;
 							
-							if (minDistance < 230) {
-								leftAngle = rightAngle + Math.PI + evasiveManeuver; 
-							} else if (minDistance >= 230 && minDistance <= 420) {
+							//🔥 近距離狂戰士模式：如果距離小於 180，直接奪取控制權，筆直跟著他貼臉狂射！
+							if (minDistance < 180) {
+								leftAngle = rightAngle; // 無視走位，直線追擊
+							} else if (minDistance >= 180 && minDistance <= 420) {
 								leftAngle = rightAngle + (Math.PI / 2) * (Math.sin(aiTime) > 0 ? 1 : -1); 
 							} else {
 								leftAngle = rightAngle + evasiveManeuver * 0.5; 

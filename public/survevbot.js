@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Surviv.IO Aimbot, ESP & X-Ray (Tablet AI Bot)
 // @namespace    https://greasyfork.org/en/users/662330-zertalious
-// @version      0.1.1
-// @description  Advanced heuristic pattern recognition bot for obfuscated private servers.
+// @version      0.1.2
+// @description  Advanced heuristic pattern recognition bot with strict center lock and circular ratio filtering.
 // @author       Zertalious (Zert) & Enhanced Logic
 // @match        *://surviv.io/*
 // @match        *://surviv2.io/*
@@ -40,7 +40,6 @@ let cachedRect = null;
 let lastRectTime = 0;
 
 let myPlayerSize = 142;
-let myPos = { x: 0, y: 0 }; 
 
 window.toggleAimbot = function() { aimbotEnabled = !aimbotEnabled; };
 window.toggleESP = function() { espEnabled = !espEnabled; };
@@ -170,48 +169,50 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 	apply( target, thisArgs, args ) {
 
 		if ( ( aimbotEnabled || espEnabled || autobotEnabled ) && args[ 0 ] ) {
-
-			//🔥 演算法 AI：完全拔除對圖片名稱 (src) 的依賴，直接分析繪圖矩陣與幾何特徵
-			const { a, b, e, f } = thisArgs.getTransform();
-
-			let drawWidth = 0;
-			let drawHeight = 0;
-
-			// 動態解析繪圖參數
-			if (args.length === 9) {
-				drawWidth = args[7];
-				drawHeight = args[8];
-			} else if (args.length === 5) {
-				drawWidth = args[3];
-				drawHeight = args[4];
-			} else if (args[0]) {
-				drawWidth = args[0].width || 0;
-				drawHeight = args[0].height || 0;
+			
+			const img = args[ 0 ];
+			
+			//🔥 幾何特徵過濾 1：確保圖片是寬高接近相等的正方形 (圓形的玩家一定存在於 1:1 的圖片中)
+			// 櫻花花瓣、大部分長管槍枝皆不符合此特徵，會在此被直接拋棄
+			const imgWidth = img.width || 0;
+			const imgHeight = img.height || 0;
+			if (imgWidth > 0 && imgHeight > 0 && Math.abs(imgWidth - imgHeight) > 2) {
+				return Reflect.apply( ...arguments );
 			}
 
-			//🔥 特徵 1：玩家圖形通常是正方形（寬高比例接近 1:1，容許微小誤差）
-			const isSquareLike = (drawWidth > 0 && drawHeight > 0) && (Math.abs(drawWidth - drawHeight) < 20);
+			//🔥 幾何特徵過濾 2：關鍵字黑名單防禦
+			const src = img.src || '';
+			if (typeof src === 'string') {
+				const lowerSrc = src.toLowerCase();
+				if (lowerSrc.includes('petal') || lowerSrc.includes('leaf') || lowerSrc.includes('particle') || lowerSrc.includes('smoke')) {
+					return Reflect.apply( ...arguments );
+				}
+			}
 
-			if (isSquareLike && drawHeight > 40 && drawHeight < 300) {
+			const { a, b, e, f } = thisArgs.getTransform();
+
+			let drawHeight = 142; 
+			if (args.length === 9) drawHeight = args[8];
+			else if (args.length === 5) drawHeight = args[4];
+
+			if (drawHeight > 40 && drawHeight < 300) {
 
 				const centerX = thisArgs.canvas.width / 2;
 				const centerY = thisArgs.canvas.height / 2;
 				const distFromCenter = Math.hypot(e - centerX, f - centerY);
 
-				//🔥 特徵 2：畫面正中央永遠是你自己。以此為絕對基準。
-				if ( distFromCenter <= 60 ) {
+				//🔥 絕對中央基準法：只要不是完美的 1 像素內誤差，就絕不是你自己
+				if ( distFromCenter <= 1 ) {
 					
 					if (drawHeight >= 60) {
 						myPlayerSize = drawHeight;
-						myPos = { x: e, y: f };
 					}
 
 				} else {
 
-					//🔥 特徵 3：敵人的大小應該與你在同一個量級 (0.4 ~ 1.6 倍)
-					if ( drawHeight > myPlayerSize * 0.4 && drawHeight < myPlayerSize * 1.6 ) {
-						// 確保不是自己的殘影
-						if ( Math.hypot(e - myPos.x, f - myPos.y) > 50 ) {
+					if ( drawHeight > myPlayerSize * 0.5 && drawHeight < myPlayerSize * 1.5 ) {
+						// 確保不在正中央的殘影區
+						if ( distFromCenter > 40 ) {
 							radius = Math.hypot( a, b ) * drawHeight + 10;
 							players.push( { x: e, y: f } );
 						}
@@ -281,13 +282,15 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 				ctx.globalAlpha = 1;
 
-				if (myPos.x !== 0) {
-					ctx.strokeStyle = 'blue';
-					ctx.lineWidth = 4;
-					ctx.beginPath();
-					ctx.arc(myPos.x, myPos.y, myPlayerSize / 2, 0, Math.PI * 2);
-					ctx.stroke();
-				}
+				//🔥 鎖定絕對中央畫藍圈
+				const exactCenterX = ctx.canvas.width / 2;
+				const exactCenterY = ctx.canvas.height / 2;
+
+				ctx.strokeStyle = 'blue';
+				ctx.lineWidth = 4;
+				ctx.beginPath();
+				ctx.arc(exactCenterX, exactCenterY, myPlayerSize / 2, 0, Math.PI * 2);
+				ctx.stroke();
 
 				const targetElement = ctx.canvas ? ctx.canvas : window;
 
@@ -333,13 +336,10 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 				let minDistance = Infinity;
 				let targetPlayer = null;
 
-				const myCharacterX = myPos.x !== 0 ? myPos.x : ctx.canvas.width / 2;
-				const myCharacterY = myPos.y !== 0 ? myPos.y : ctx.canvas.height / 2;
-
 				for ( let i = 0; i < players.length; i ++ ) {
 
 					const player = players[ i ];
-					const distance = Math.hypot( player.x - myCharacterX, player.y - myCharacterY );
+					const distance = Math.hypot( player.x - exactCenterX, player.y - exactCenterY );
 
 					if ( distance < minDistance ) {
 						minDistance = distance;
@@ -354,7 +354,7 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 					ctx.strokeStyle = autobotEnabled ? '#ffeb3b' : 'red';
 
 					ctx.beginPath();
-					ctx.moveTo( myCharacterX, myCharacterY );
+					ctx.moveTo( exactCenterX, exactCenterY );
 					ctx.lineTo( targetPlayer.x, targetPlayer.y );
 					ctx.stroke();
 
@@ -363,7 +363,7 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 						if (p !== targetPlayer) {
 							ctx.strokeStyle = 'red';
 							ctx.beginPath();
-							ctx.moveTo( myCharacterX, myCharacterY );
+							ctx.moveTo( exactCenterX, exactCenterY );
 							ctx.lineTo( p.x, p.y );
 							ctx.stroke();
 						}
@@ -415,7 +415,7 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 
 					if ( typeof PointerEvent !== 'undefined' || typeof TouchEvent !== 'undefined' ) {
 						
-						const rightAngle = Math.atan2(predictY - myCharacterY, predictX - myCharacterX);
+						const rightAngle = Math.atan2(predictY - exactCenterY, predictX - exactCenterX);
 						const rJoyCenterX = window.innerWidth * 0.75;
 						const rJoyCenterY = window.innerHeight * 0.75;
 						

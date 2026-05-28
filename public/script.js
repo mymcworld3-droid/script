@@ -42,108 +42,65 @@ async function fetchScriptCode() {
     }
 }
 
-function runScript() {
+//🔥 徹底修改執行邏輯：改為透過後端將腳本注入 HTML 後重新載入
+async function runScript() {
+    const url = document.getElementById('url-input').value;
     const code = document.getElementById('code-input').value;
     const iframe = document.getElementById('target-frame');
     const outputElement = document.getElementById('output');
     
-    outputElement.innerHTML += '\n--- 準備執行腳本 ---\n';
+    if (!url) {
+        outputElement.innerHTML += '請先輸入上方要載入的網頁網址。\n';
+        return;
+    }
+    
+    outputElement.innerHTML += '\n--- 準備在網頁載入前注入腳本 ---\n';
     
     try {
-        const iframeWindow = iframe.contentWindow;
-        const iframeDoc = iframeWindow.document;
+        // 1. 將腳本傳送到伺服器準備
+        const response = await fetch('/prepare-inject', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ code: code })
+        });
         
-        //🔥 模擬 Tampermonkey 的 unsafeWindow
-        iframeWindow.unsafeWindow = iframeWindow;
+        if (!response.ok) {
+            throw new Error('腳本上傳到伺服器失敗');
+        }
         
-        //🔥 模擬 Tampermonkey 的腳本資訊物件
-        iframeWindow.GM_info = {
-            script: { name: '線上測試腳本', version: '1.0' },
-            scriptMetaStr: ''
-        };
+        const data = await response.json();
+        const injectId = data.id;
         
-        //🔥 模擬 GM_addStyle (用來在網頁中注入 CSS 樣式)
-        iframeWindow.GM_addStyle = function(css) {
-            const style = iframeDoc.createElement('style');
-            style.textContent = css;
-            (iframeDoc.head || iframeDoc.documentElement).appendChild(style);
-        };
+        // 2. 重新載入 iframe，並帶上 injectId 要求後端注入
+        const proxyUrl = `/proxy?url=${encodeURIComponent(url)}&injectId=${injectId}`;
+        iframe.src = proxyUrl;
         
-        //🔥 模擬 GM_setValue (使用 iframe 內的 localStorage 來儲存資料)
-        iframeWindow.GM_setValue = function(name, value) {
-            iframeWindow.localStorage.setItem('GM_' + name, JSON.stringify(value));
-        };
-        
-        //🔥 模擬 GM_getValue (讀取儲存的資料)
-        iframeWindow.GM_getValue = function(name, defaultValue) {
-            const value = iframeWindow.localStorage.getItem('GM_' + name);
-            if (value === null) return defaultValue;
-            try {
-                return JSON.parse(value);
-            } catch (e) {
-                return value;
-            }
-        };
-        
-        //🔥 模擬 GM_deleteValue (刪除資料)
-        iframeWindow.GM_deleteValue = function(name) {
-            iframeWindow.localStorage.removeItem('GM_' + name);
-        };
-        
-        //🔥 模擬 GM_xmlhttpRequest (使用 fetch API 來模擬外部請求)
-        iframeWindow.GM_xmlhttpRequest = function(details) {
-            fetch(details.url, {
-                method: details.method || 'GET',
-                headers: details.headers,
-                body: details.data
-            })
-            .then(response => response.text().then(text => ({ response, text })))
-            .then(({ response, text }) => {
-                if (details.onload) {
-                    details.onload({
-                        status: response.status,
-                        statusText: response.statusText,
-                        responseText: text,
-                        readyState: 4
-                    });
-                }
-            })
-            .catch(err => {
-                if (details.onerror) {
-                    details.onerror(err);
-                }
-            });
-        };
-        
-        // 嘗試在 iframe 的環境下使用 eval 執行程式碼
-        iframeWindow.eval(code);
-        
-        outputElement.innerHTML += '腳本執行指令已送出。\n';
+        outputElement.innerHTML += '腳本已與網頁合併，正在重新載入網頁...\n';
+        outputElement.innerHTML += '【系統提示】為了突破封鎖，腳本將在網頁初始化 (document-start) 時自動執行。\n';
     } catch (error) {
         outputElement.innerHTML += '<span style="color: #ff5555;">執行失敗：' + error.message + '</span>\n';
     }
 }
 
-//🔥 新增：處理進入與退出全螢幕的核心邏輯
 function toggleFullscreen() {
     const iframe = document.getElementById('target-frame');
     
     if (!document.fullscreenElement) {
-        // 如果目前不是全螢幕，則要求 iframe 進入全螢幕
         if (iframe.requestFullscreen) {
             iframe.requestFullscreen();
-        } else if (iframe.webkitRequestFullscreen) { // 支援 Safari
+        } else if (iframe.webkitRequestFullscreen) {
             iframe.webkitRequestFullscreen();
-        } else if (iframe.msRequestFullscreen) { // 支援 IE/Edge
+        } else if (iframe.msRequestFullscreen) {
             iframe.msRequestFullscreen();
         }
     } else {
-        // 如果已經是全螢幕，則要求整份文件退出全螢幕
         if (document.exitFullscreen) {
             document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) { // 支援 Safari
+        } else if (document.webkitExitFullscreen) {
             document.webkitExitFullscreen();
-        } else if (document.msExitFullscreen) { // 支援 IE/Edge
+        } else if (document.msExitFullscreen) {
             document.msExitFullscreen();
         }
     }

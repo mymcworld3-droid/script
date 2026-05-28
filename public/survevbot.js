@@ -1,4 +1,3 @@
-survevbot
 
 // ==UserScript==
 // @name         Surviv.IO Aimbot, ESP & X-Ray

@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Surviv.IO Aimbot, ESP & X-Ray (Tablet AI Bot)
+// @name         Surviv.IO Aimbot, ESP & X-Ray (Strict Symmetry Cluster)
 // @namespace    https://greasyfork.org/en/users/662330-zertalious
-// @version      0.2.6
-// @description  Official layout optimization for inside embedded frame games.
-// @author       Zertalious (Zert) & Enhanced Logic
+// @version      1.0.9
+// @description  Aimbot and ESP for surviv.io. Advanced validation requiring two identical hands and one larger body.
+// @author       Zertalious (Zert) & Enhanced AI
 // @match        *://surviv.io/*
 // @match        *://surviv2.io/*
 // @match        *://2dbattleroyale.com/*
@@ -28,26 +28,6 @@
 let espEnabled = true;
 let aimbotEnabled = true;
 let xrayEnabled = true;
-let autobotEnabled = false; 
-
-let lastTargetPos = null;
-const predictionFactor = 2.5;
-
-let isSpoofingRightJoy = false;
-let isSpoofingLeftJoy = false;
-
-let cachedRect = null;
-let lastRectTime = 0;
-
-let myPlayerSize = 142;
-let myPos = { x: 0, y: 0 }; 
-
-window.currentFrameMaxBody = 0;
-
-window.toggleAimbot = function() { aimbotEnabled = !aimbotEnabled; };
-window.toggleESP = function() { espEnabled = !espEnabled; };
-window.toggleXRay = function() { xrayEnabled = !xrayEnabled; };
-window.toggleAutobot = function() { autobotEnabled = !autobotEnabled; };
 
 Object.defineProperty( Object.prototype, 'textureCacheIds', {
 	set( value ) {
@@ -93,8 +73,18 @@ Object.defineProperty( Object.prototype, 'textureCacheIds', {
 	}
 } );
 
-Object.defineProperty( window, 'WebGLRenderingContext', { get() { return null; } } );
-Object.defineProperty( window, 'WebGL2RenderingContext', { get() { return null; } } );
+const params = {
+	get() {
+
+		console.log( 'getting ctx', this );
+
+		return null;
+
+	}
+};
+
+Object.defineProperty( window, 'WebGLRenderingContext', params );
+Object.defineProperty( window, 'WebGL2RenderingContext', params );
 
 let ctx;
 
@@ -115,6 +105,7 @@ HTMLCanvasElement.prototype.getContext = new Proxy( HTMLCanvasElement.prototype.
 } );
 
 const players = [];
+let tempClusterBucket = [];
 
 let radius;
 
@@ -131,28 +122,6 @@ window.addEventListener( 'mousemove', function ( event ) {
 
 } );
 
-window.addEventListener( 'touchmove', function ( event ) {
-
-	if ( event.dispatchedByMe !== true && event.touches.length > 0 ) {
-
-		mouseX = event.touches[ 0 ].clientX;
-		mouseY = event.touches[ 0 ].clientY;
-
-	}
-
-}, { passive: true } );
-
-window.addEventListener( 'touchstart', function ( event ) {
-
-	if ( event.dispatchedByMe !== true && event.touches.length > 0 ) {
-
-		mouseX = event.touches[ 0 ].clientX;
-		mouseY = event.touches[ 0 ].clientY;
-
-	}
-
-}, { passive: true } );
-
 window.addEventListener( 'keyup', function ( event ) {
 
 	switch ( String.fromCharCode( event.keyCode ) ) {
@@ -160,7 +129,6 @@ window.addEventListener( 'keyup', function ( event ) {
 		case 'N' : espEnabled = ! espEnabled; break;
 		case 'B' : aimbotEnabled = ! aimbotEnabled; break;
 		case 'H' : xrayEnabled = ! xrayEnabled; break;
-		case 'J' : autobotEnabled = ! autobotEnabled; break;
 
 	}
 
@@ -171,28 +139,26 @@ const Context2D = CanvasRenderingContext2D.prototype;
 Context2D.drawImage = new Proxy( Context2D.drawImage, {
 	apply( target, thisArgs, args ) {
 
-		if ( ( aimbotEnabled || espEnabled || autobotEnabled ) && args[ 0 ] ) {
-			
+		if ( (aimbotEnabled || espEnabled) && args[ 0 ] ) {
+
 			const img = args[ 0 ];
-			
+
 			if (img._cachedSrc === undefined) {
 				let s = (typeof img.src === 'string') ? img.src.toLowerCase() : '';
-				//🔥 既然是官方最原始的代碼，直接鎖定官方的命名特徵：
-				// 服裝(outfit)或玩家角色(player)，並且絕對不包含地圖阻擋物(map)跟影子(shadow)及掉落物(loot)
-				if ((s.includes('outfit') || s.includes('player') || s.includes('surviv')) && !s.includes('map') && !s.includes('shadow') && !s.includes('loot') && !s.includes('particle')) {
-					s = 'valid';
-				} else {
+				if (s.includes('map') || s.includes('floor') || s.includes('grass') || s.includes('shadow') || s.includes('tile') || s.includes('wall')) {
 					s = 'ignore';
+				} else {
+					s = 'valid';
 				}
 				img._cachedSrc = s;
 			}
 
 			if ( img._cachedSrc === 'valid' ) {
 
-				const { a, b, e, f } = thisArgs.getTransform();
+				const { a, b, c, d, e, f } = thisArgs.getTransform();
 
 				let drawWidth = 0;
-				let drawHeight = 0; 
+				let drawHeight = 0;
 
 				if (args.length === 9) {
 					drawWidth = args[7];
@@ -202,34 +168,30 @@ Context2D.drawImage = new Proxy( Context2D.drawImage, {
 					drawHeight = args[4];
 				}
 
-				if (drawWidth <= 0 || drawHeight <= 0) return Reflect.apply( ...arguments );
+				if (drawWidth > 0 && drawHeight > 0) {
+					let ratio = drawWidth / drawHeight;
 
-				// 只要比例接近正方形（圓形角色身型），且大小在玩家合理尺寸之內
-				let ratio = drawWidth / drawHeight;
-				if (ratio >= 0.7 && ratio <= 1.3 && drawHeight >= 35 && drawHeight < 300) {
+					if (ratio >= 0.5 && ratio <= 1.5 && drawHeight >= 30 && drawHeight < 300) {
 
-					const centerX = thisArgs.canvas.width / 2;
-					const centerY = thisArgs.canvas.height / 2;
-					const distFromCenter = Math.hypot(e - centerX, f - centerY);
+						const canvasW = thisArgs.canvas.width;
+						const canvasH = thisArgs.canvas.height;
+						const centerX = canvasW / 2;
+						const centerY = canvasH / 2;
 
-					if ( distFromCenter <= 30 ) {
-						
-						if (drawHeight > window.currentFrameMaxBody) {
-							window.currentFrameMaxBody = drawHeight;
-							myPlayerSize = drawHeight;
-							myPos = { x: e, y: f };
-						}
+						if ( Math.abs(e - centerX) > 45 || Math.abs(f - centerY) > 45 ) {
 
-					} else {
+							if ( Math.abs(b) > 0.01 ) {
+								radius = Math.hypot( a, b ) * drawHeight + 10;
+								tempClusterBucket.push( { x: e, y: f, h: drawHeight } );
+							}
 
-						if ( distFromCenter > 40 ) {
-							radius = Math.hypot( a, b ) * drawHeight + 10;
-							players.push( { x: e, y: f, r: radius } );
 						}
 
 					}
 				}
+
 			}
+
 		}
 
 		return Reflect.apply( ...arguments );
@@ -243,39 +205,90 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 		args[ 0 ] = new Proxy( args[ 0 ], {
 			apply( target, thisArgs, args ) {
 
-				window.currentFrameMaxBody = 0;
-
-				let validTargets = [...players];
 				players.length = 0;
-				
+
+				// 用於記錄已被成功配對過大核心的標記，避免同一玩家被重複塞入
+				let verifiedBodyCenters = new Set();
+
+				//🔥 嚴格非對稱對稱性群聚過濾器 (2小同尺寸 + 1大)
+				for ( let i = 0; i < tempClusterBucket.length; i ++ ) {
+					const b1 = tempClusterBucket[ i ];
+					
+					// 尋找局部小範圍內相鄰的物件
+					let localNeighbors = [];
+					for ( let j = 0; j < tempClusterBucket.length; j ++ ) {
+						if ( i === j ) continue;
+						const b2 = tempClusterBucket[ j ];
+						
+						if ( Math.hypot( b1.x - b2.x, b1.y - b2.y ) <= 85 ) {
+							localNeighbors.push( b2 );
+						}
+					}
+
+					// 如果周圍包含自己在內至少能湊滿 3 個物件，展開深度特徵排查
+					if ( localNeighbors.length >= 2 ) {
+						let isMatchedPlayer = false;
+						let matchedLargeObj = null;
+
+						// 將包含自己在內的所有相鄰組件放在一起分析
+						let fullGroup = [ b1, ...localNeighbors ];
+
+						// 排列組合窮舉任意三個點，確認是否符合「兩隻相同大小的手」＋「一隻大身體」
+						for ( let x = 0; x < fullGroup.length; x ++ ) {
+							for ( let y = x + 1; y < fullGroup.length; y ++ ) {
+								for ( let z = y + 1; z < fullGroup.length; z ++ ) {
+									
+									let n1 = fullGroup[ x ];
+									let n2 = fullGroup[ y ];
+									let n3 = fullGroup[ z ];
+
+									// 情況一：n1, n2 為相同大小的手，n3 為大身體
+									if ( Math.abs( n1.h - n2.h ) <= 3 && n3.h >= n1.h + 15 && n3.h >= n2.h + 15 ) {
+										isMatchedPlayer = true;
+										matchedLargeObj = n3;
+										break;
+									}
+									// 情況二：n1, n3 為相同大小的手，n2 為大身體
+									if ( Math.abs( n1.h - n3.h ) <= 3 && n2.h >= n1.h + 15 && n2.h >= n3.h + 15 ) {
+										isMatchedPlayer = true;
+										matchedLargeObj = n2;
+										break;
+									}
+									// 情況三：n2, n3 為相同大小的手，n1 為大身體
+									if ( Math.abs( n2.h - n3.h ) <= 3 && n1.h >= n2.h + 15 && n1.h >= n3.h + 15 ) {
+										isMatchedPlayer = true;
+										matchedLargeObj = n1;
+										break;
+									}
+								}
+								if ( isMatchedPlayer ) break;
+							}
+							if ( isMatchedPlayer ) break;
+						}
+
+						// 通過兩小一同尺寸、一大的硬核過濾，且尚未標記過，則正式認定為玩家身體核心
+						if ( isMatchedPlayer && matchedLargeObj ) {
+							const key = `${Math.round(matchedLargeObj.x)},${Math.round(matchedLargeObj.y)}`;
+							if ( ! verifiedBodyCenters.has( key ) ) {
+								verifiedBodyCenters.add( key );
+								players.push( { x: matchedLargeObj.x, y: matchedLargeObj.y } );
+							}
+						}
+					}
+				}
+
+				tempClusterBucket.length = 0;
+
 				Reflect.apply( ...arguments );
 
-				const simulateTouch = (el, type, id, x, y) => {
-					if (typeof PointerEvent !== 'undefined') {
-						el.dispatchEvent(new PointerEvent(type, {
-							pointerId: id, pointerType: 'touch', clientX: x, clientY: y, 
-							bubbles: true, cancelable: true, isPrimary: (id === 88), dispatchedByMe: true
-						}));
-					}
-					try {
-						if (typeof TouchEvent !== 'undefined' && typeof Touch !== 'undefined') {
-							const tType = type.replace('pointer', 'touch');
-							const touch = new Touch({ identifier: id, target: el, clientX: x, clientY: y, pageX: x, pageY: y, screenX: x, screenY: y });
-							el.dispatchEvent(new TouchEvent(tType, {
-								touches: [touch], targetTouches: [touch], changedTouches: [touch],
-								bubbles: true, cancelable: true, dispatchedByMe: true
-							}));
-						}
-					} catch (e) {}
-				};
+				if (!ctx) return;
 
 				ctx.fillStyle = '#fff';
 
 				const array = [
 					[ '[B] Aimbot', aimbotEnabled ],
 					[ '[N] ESP', espEnabled ],
-					[ '[H] X-Ray', xrayEnabled ],
-					[ '[J] Auto-Bot', autobotEnabled ]
+					[ '[H] X-Ray', xrayEnabled ]
 				];
 
 				const fontSize = 20;
@@ -288,194 +301,81 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 				for ( let i = 0; i < array.length; i ++ ) {
 
 					const [ text, status ] = array[ i ];
+
 					ctx.globalAlpha = status ? 1 : 0.5;
+
 					ctx.fillText( text + ': ' + ( status ? 'ON' : 'OFF' ), ctx.canvas.width / 2, 10 + i * fontSize );
 
 				}
 
 				ctx.globalAlpha = 1;
 
-				const myCharacterX = myPos.x !== 0 ? myPos.x : ctx.canvas.width / 2;
-				const myCharacterY = myPos.y !== 0 ? myPos.y : ctx.canvas.height / 2;
-
-				ctx.strokeStyle = 'blue';
-				ctx.lineWidth = 4;
-				ctx.beginPath();
-				ctx.arc(myCharacterX, myCharacterY, myPlayerSize / 2, 0, Math.PI * 2);
-				ctx.stroke();
-
-				const targetElement = ctx.canvas ? ctx.canvas : window;
-
-				if ( validTargets.length === 0 ) {
-
-					lastTargetPos = null;
-
-					if (autobotEnabled) {
-						
-						const patrolTime = Date.now() * 0.001;
-						const patrolAngle = patrolTime;
-						const lJoyCenterX = window.innerWidth * 0.25;
-						const lJoyCenterY = window.innerHeight * 0.75;
-						const pTouchX = lJoyCenterX + Math.cos(patrolAngle) * 30; 
-						const pTouchY = lJoyCenterY + Math.sin(patrolAngle) * 30;
-
-						if (!isSpoofingLeftJoy) {
-							simulateTouch(targetElement, 'pointerdown', 88, lJoyCenterX, lJoyCenterY);
-							isSpoofingLeftJoy = true;
-						}
-						simulateTouch(targetElement, 'pointermove', 88, pTouchX, pTouchY);
-
-						if (isSpoofingRightJoy) {
-							simulateTouch(targetElement, 'pointerup', 99, window.innerWidth * 0.75, window.innerHeight * 0.75);
-							isSpoofingRightJoy = false;
-						}
-
-					} else {
-						if (isSpoofingRightJoy) {
-							simulateTouch(targetElement, 'pointerup', 99, window.innerWidth * 0.75, window.innerHeight * 0.75);
-							isSpoofingRightJoy = false;
-						}
-						if (isSpoofingLeftJoy) {
-							simulateTouch(targetElement, 'pointerup', 88, window.innerWidth * 0.25, window.innerHeight * 0.75);
-							isSpoofingLeftJoy = false;
-						}
-					}
+				if ( players.length === 0 ) {
 
 					return;
 
 				}
 
-				let minDistance = Infinity;
-				let targetPlayer = null;
+				ctx.lineWidth = 5;
+				ctx.strokeStyle = 'red';
 
-				for ( let i = 0; i < validTargets.length; i ++ ) {
+				if ( espEnabled ) {
 
-					const player = validTargets[ i ];
-					const distance = Math.hypot( player.x - myCharacterX, player.y - myCharacterY );
+					const centerX = ctx.canvas.width / 2;
+					const centerY = ctx.canvas.height / 2;
 
-					if ( distance < minDistance ) {
-						minDistance = distance;
-						targetPlayer = player;
+					ctx.beginPath();
+
+					for ( let i = 0; i < players.length; i ++ ) {
+
+						const player = players[ i ];
+
+						ctx.moveTo( centerX, centerY );
+
+						ctx.lineTo( player.x, player.y );
+
 					}
+
+					ctx.stroke();
 
 				}
 
-				if ( espEnabled && targetPlayer ) {
+				if ( aimbotEnabled ) {
 
-					ctx.lineWidth = 5;
-					ctx.strokeStyle = autobotEnabled ? '#ffeb3b' : 'red';
+					let minDistance = Infinity;
+					let targetPlayer;
 
-					ctx.beginPath();
-					ctx.moveTo( myCharacterX, myCharacterY );
-					ctx.lineTo( targetPlayer.x, targetPlayer.y );
-					ctx.stroke();
+					for ( let i = 0; i < players.length; i ++ ) {
 
-					for ( let i = 0; i < validTargets.length; i ++ ) {
-						const p = validTargets[ i ];
-						if (p !== targetPlayer) {
-							ctx.strokeStyle = 'red';
-							ctx.beginPath();
-							ctx.moveTo( myCharacterX, myCharacterY );
-							ctx.lineTo( p.x, p.y );
-							ctx.stroke();
+						const player = players[ i ];
+
+						const distance = Math.hypot( player.x - mouseX, player.y - mouseY );
+
+						if ( distance < minDistance ) {
+
+							minDistance = distance;
+							targetPlayer = player;
+
 						}
+
 					}
 
-				}
+					if ( targetPlayer ) {
 
-				if ( (aimbotEnabled || autobotEnabled) && targetPlayer ) {
-					
-					let predictX = targetPlayer.x;
-					let predictY = targetPlayer.y;
+						ctx.beginPath();
 
-					if ( lastTargetPos ) {
-						const velocityX = targetPlayer.x - lastTargetPos.x;
-						const velocityY = targetPlayer.y - lastTargetPos.y;
-						
-						const moveDistance = Math.hypot(velocityX, velocityY);
-						
-						if ( moveDistance < 50 ) { 
-							const bulletTravelTime = (minDistance / 100) * predictionFactor;
-							predictX += velocityX * bulletTravelTime;
-							predictY += velocityY * bulletTravelTime;
-						}
+						ctx.arc( targetPlayer.x, targetPlayer.y, radius, 0, Math.PI * 2 );
+
+						ctx.stroke();
+
+						window.dispatchEvent( new MouseEvent( 'mousemove', {
+							clientX: targetPlayer.x,
+							clientY: targetPlayer.y,
+							dispatchedByMe: true
+						} ) );
+
 					}
 
-					lastTargetPos = { x: targetPlayer.x, y: targetPlayer.y };
-
-					ctx.beginPath();
-					ctx.strokeStyle = autobotEnabled ? '#ffeb3b' : 'red'; 
-					ctx.arc( predictX, predictY, targetPlayer.r || radius, 0, Math.PI * 2 );
-					ctx.stroke();
-
-					let screenX = predictX;
-					let screenY = predictY;
-
-					if (ctx.canvas) {
-						const now = Date.now();
-						if (!cachedRect || now - lastRectTime > 1000) {
-							cachedRect = ctx.canvas.getBoundingClientRect();
-							lastRectTime = now;
-						}
-						const scaleX = cachedRect.width / ctx.canvas.width;
-						const scaleY = cachedRect.height / ctx.canvas.height;
-						screenX = (predictX * scaleX) + cachedRect.left;
-						screenY = (predictY * scaleY) + cachedRect.top;
-					}
-
-					targetElement.dispatchEvent( new MouseEvent( 'mousemove', { clientX: screenX, clientY: screenY, bubbles: true, dispatchedByMe: true } ) );
-
-					if ( typeof PointerEvent !== 'undefined' || typeof TouchEvent !== 'undefined' ) {
-						
-						const rightAngle = Math.atan2(predictY - myCharacterY, predictX - myCharacterX);
-						const rJoyCenterX = window.innerWidth * 0.75;
-						const rJoyCenterY = window.innerHeight * 0.75;
-						
-						const rTouchX = rJoyCenterX + Math.cos(rightAngle) * 60;
-						const rTouchY = rJoyCenterY + Math.sin(rightAngle) * 60;
-
-						if (!isSpoofingRightJoy) {
-							simulateTouch(targetElement, 'pointerdown', 99, rJoyCenterX, rJoyCenterY);
-							isSpoofingRightJoy = true;
-						}
-						simulateTouch(targetElement, 'pointermove', 99, rTouchX, rTouchY);
-
-						if (autobotEnabled) {
-							
-							let leftAngle = rightAngle; 
-							const aiTime = Date.now() * 0.005;
-							const evasiveManeuver = Math.sin(aiTime) * 0.8;
-							
-							if (minDistance < 180) {
-								leftAngle = rightAngle; 
-							} else if (minDistance >= 180 && minDistance <= 420) {
-								leftAngle = rightAngle + (Math.PI / 2) * (Math.sin(aiTime) > 0 ? 1 : -1); 
-							} else {
-								leftAngle = rightAngle + evasiveManeuver * 0.5; 
-							}
-
-							const lJoyCenterX = window.innerWidth * 0.25;
-							const lJoyCenterY = window.innerHeight * 0.75;
-							
-							const lTouchX = lJoyCenterX + Math.cos(leftAngle) * 60;
-							const lTouchY = lJoyCenterY + Math.sin(leftAngle) * 60;
-
-							if (!isSpoofingLeftJoy) {
-								simulateTouch(targetElement, 'pointerdown', 88, lJoyCenterX, lJoyCenterY);
-								isSpoofingLeftJoy = true;
-							}
-							simulateTouch(targetElement, 'pointermove', 88, lTouchX, lTouchY);
-
-						} else {
-							if (isSpoofingLeftJoy) {
-								simulateTouch(targetElement, 'pointerup', 88, window.innerWidth * 0.25, window.innerHeight * 0.75);
-								isSpoofingLeftJoy = false;
-							}
-						}
-					}
-
-				} else {
-					lastTargetPos = null;
 				}
 
 			}
@@ -487,8 +387,6 @@ window.requestAnimationFrame = new Proxy( window.requestAnimationFrame, {
 } );
 
 window.addEventListener( 'DOMContentLoaded', function () {
-
-	const shouldShowAd = false;
 
 	const el = document.createElement( 'div' );
 
@@ -542,14 +440,17 @@ window.addEventListener( 'DOMContentLoaded', function () {
 	}
 
 	</style>
-	<div class="my-dialog">${shouldShowAd ? `<big>Loading ad...</big>` : `<div class="my-close" onclick="this.parentNode.style.display='none';"></div>
+	<div class="my-dialog">
+		<div class="my-close" onclick="this.parentNode.style.display='none';"></div>
 		<big style="font-size: 2em;">Aimbot, ESP & X-Ray</big>
 		<br>
 		<br>
-		<div style="cursor:pointer; background:#9c27b0; padding:10px; margin:5px; border-radius:5px; font-weight:bold;" onclick="window.toggleAimbot()">[點擊切換] Aimbot</div>
-		<div style="cursor:pointer; background:#e91e63; padding:10px; margin:5px; border-radius:5px; font-weight:bold;" onclick="window.toggleXRay()">[點擊切換] X-Ray</div>
-		<div style="cursor:pointer; background:#2196f3; padding:10px; margin:5px; border-radius:5px; font-weight:bold;" onclick="window.toggleESP()">[點擊切換] ESP</div>
-		<div style="cursor:pointer; background:#ff5722; padding:10px; margin:5px; border-radius:5px; font-weight:bold;" onclick="window.toggleAutobot()">[點擊切換] Auto-Bot</div>
+		[B] to toggle aimbot
+		<br>
+		[H] to toggle x-ray
+		<br>
+		[N] to toggle esp
+		<br>
 		<br>
 		By Zertalious
 		<br>
@@ -558,7 +459,6 @@ window.addEventListener( 'DOMContentLoaded', function () {
 		<div class="btn-orange btn-darken menu-option" onclick="window.open('https://www.instagram.com/zertalious/', '_blank')">Instagram</div>
 		<div class="btn-blue btn-darken menu-option" onclick="window.open('https://twitter.com/Zertalious', '_blank')">Twitter</div>
 		<div class="btn-green btn-darken menu-option" onclick="window.open('https://greasyfork.org/en/users/662330-zertalious', '_blank')">More scripts</div>
-		` }
 	</div>`;
 
 	while ( el.children.length > 0 ) {
